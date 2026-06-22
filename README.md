@@ -36,8 +36,6 @@ Public IPs | Internet servers (Google, Cloudflare, Microsoft, etc.)
 
 # Potential Next Steps
 
-- Add hostname resolution
-
 - Add a Top 10 destination ports chart
 
 - Add a filter dropdown for TCP/UDP/ICMP

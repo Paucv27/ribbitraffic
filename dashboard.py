@@ -12,6 +12,7 @@ import logging
 from typing import Dict, List, Optional
 import socket
 
+
 logging.basicConfig(
     level=logging.DEBUG,
     format="%(asctime)s [%(levelname)s]: %(message)s"
@@ -133,36 +134,40 @@ def create_visualisations(df: pd.DataFrame) -> None:
         # Top Source IPs Bar Chart -------------------
         # displays the top 10 source IPs by packet count
 
-        top_src_ips = df['src_ip'].value_counts().head(10)
-        fig_src_ips = px.bar(
-            x=top_src_ips.index,
-            y=top_src_ips.values,
-            title='Top 10 Source IPs',
-            labels={'x': 'Source IP', 'y': 'Packet Count'}
+        # create a new column that combines source IP and hostname for better visualization
+        df['src_label'] = (
+            df['src_ip'].astype(str)
+            + ' ('
+            + df['src_hostname'].fillna('Unknown')
+            + ')'
         )
-        st.plotly_chart(fig_src_ips, use_container_width='stretch')
+        top_sources = df['src_label'].value_counts().head(10)
+        fig_src = px.bar(
+            x=top_sources.index,
+            y=top_sources.values,
+            title='Top 10 Source Hosts',
+            labels={
+                'x': 'Source (IP + Hostname)',
+                'y': 'Packet Count'
+            }
+        )
 
-        top_src_hosts = df['src_hostname'].value_counts().head(10)
-        fig_src_hosts = px.bar(
-            x=top_src_hosts.index,
-            y=top_src_hosts.values,
-            title='Top 10 Source Hostnames',
-            labels={'x': 'Source Hostname', 'y': 'Packet Count'}
-        )
-        st.plotly_chart(fig_src_hosts, use_container_width='stretch')
+        fig_src.update_xaxes(type='category')
+
+        st.plotly_chart(fig_src, use_container_width=True)
 
         # Top Ports Used ----------------------------
         top_dst_ports = df['dst_port'].value_counts().head(20).reset_index()
-        top_dst_ports.columns = ['Port', 'Count']
-        top_dst_ports['Label'] = top_dst_ports['Port'].map(
+        top_dst_ports.columns = ['dst_port', 'count']
+        top_dst_ports['Label'] = top_dst_ports['dst_port'].map(
             lambda p: f"{p} ({COMMON_PORTS[p]})" if p in COMMON_PORTS else str(p)
         )
         fig_dst_ports = px.bar(
             top_dst_ports,
             x='Label',
-            y='Count',
+            y='count',
             title='Top 20 Destination Ports',
-            labels={'Label': 'Destination Port', 'Count': 'Packet Count'}
+            labels={'Label': 'Destination Port', 'count': 'Packet Count'}
         )
         fig_dst_ports.update_xaxes(type='category')
         st.plotly_chart(fig_dst_ports, use_container_width='stretch')
