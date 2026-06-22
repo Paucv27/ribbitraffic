@@ -275,7 +275,7 @@ def main():
         )
 
     # could change this to see which conversations transfer the most data (using 'size' col)
-    st.subheader("Conversations")
+    st.subheader("Top Conversations")
     if len(df) > 0:
         conversation = (
             df['src_hostname']
