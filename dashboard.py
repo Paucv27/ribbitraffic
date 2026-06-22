@@ -11,6 +11,7 @@ import warnings
 import logging
 from typing import Dict, List, Optional
 import socket
+import ipaddress
 
 
 logging.basicConfig(
@@ -56,6 +57,8 @@ class PacketProcessor:
         try:
             if IP in packet:
                 # lock so that multiple threads don't modify packet_data at the same time
+                # e.g. capture thread is adding new packets while the main thread is reading packet_data to update visualizations
+                # this ensures thread safety and prevents inconsistencies
                 with self.lock:
 
                     # extract core packet information
@@ -65,6 +68,7 @@ class PacketProcessor:
                         'src_hostname': resolve_hostname(packet[IP].src),
                         'dst_ip': packet[IP].dst,
                         'dst_hostname': resolve_hostname(packet[IP].dst),
+                        'dst_location': 'Local' if is_private_ip(packet[IP].dst) else 'Remote',
                         'protocol': self.get_protocol_name(packet[IP].proto),
                         'size': len(packet),
                         'time_relative': (datetime.now() - self.start_time).total_seconds(),
@@ -151,10 +155,25 @@ def create_visualisations(df: pd.DataFrame) -> None:
                 'y': 'Packet Count'
             }
         )
-
         fig_src.update_xaxes(type='category')
-
         st.plotly_chart(fig_src, use_container_width=True)
+
+        # Top Destination IPs Bar Chart -------------
+        df['dst_label'] = (
+            df['dst_ip'].astype(str)
+            + ' ('
+            + df['dst_hostname'].fillna('Unknown')
+            + ')'
+        )
+        top_dst_ips = df['dst_label'].value_counts().head(10)
+        fig_dst_ips = px.bar(
+            x=top_dst_ips.index,
+            y=top_dst_ips.values,
+            title='Top 10 Destination IPs',
+            labels={'x': 'Destination IP', 'y': 'Packet Count'}
+        )
+
+        st.plotly_chart(fig_dst_ips, use_container_width=True)
 
         # Top Ports Used ----------------------------
         top_dst_ports = df['dst_port'].value_counts().head(20).reset_index()
@@ -186,7 +205,7 @@ def start_packet_capture() -> None:
         except Exception as e:
             logger.error(f"Error during scapy packet capture: {str(e)}")
     
-    # ensure that the packet capturing operation does not block other operations like updating the dashboard in real-time
+    # ensure that the packet capturing operation does not block other operations
     capture_thread = threading.Thread(target=capture_packets, daemon=True)
     capture_thread.start()
 
@@ -194,11 +213,25 @@ def start_packet_capture() -> None:
     return processor
 
 
-def resolve_hostname(ip):
+def resolve_hostname(ip) -> str:
     try:
         return socket.gethostbyaddr(ip)[0]
     except Exception:
         return "Unknown"
+    
+
+def is_private_ip(ip) -> bool:
+    """ 
+    Check if an IP address is private 
+
+    True if the IP is private (e.g. 192.168.x.x, 10.x.x.x, 172.16.x.x - 172.31.x.x), 
+    
+    False otherwise
+    """
+    try:
+        return ipaddress.ip_address(ip).is_private
+    except ValueError:
+        return False
 
 
 def main():
@@ -212,6 +245,9 @@ def main():
     if 'processor' not in st.session_state:
         st.session_state.processor = start_packet_capture()
         st.session_state.start_time = time.time()
+
+        time.sleep(3)  # give some time for the first packets to be captured
+        st.rerun()  # refresh the dashboard to display initial data
 
     # Create Dashboard Layout
     col1, col2 = st.columns(2)
@@ -234,15 +270,31 @@ def main():
     st.subheader("Recent Packets")
     if len(df) > 0:
         st.dataframe(
-            df.tail(10)[['timestamp', 'src_ip', 'src_hostname', 'dst_ip', 'dst_hostname', 'protocol', 'size', 'src_port', 'dst_port']],
+            df.tail(10)[['timestamp', 'src_ip', 'src_hostname', 'dst_ip', 'dst_hostname', 'dst_location', 'protocol', 'size', 'src_port', 'dst_port']],
+            use_container_width='stretch'
+        )
+
+    # could change this to see which conversations transfer the most data (using 'size' col)
+    st.subheader("Conversations")
+    if len(df) > 0:
+        conversation = (
+            df['src_hostname']
+            + ' ('
+            + df['src_ip'].astype(str)
+            + ')'
+            + ' -> ' 
+            + df['dst_hostname']
+            + ' ('
+            + df['dst_ip'].astype(str)
+            + ')'
+        )
+        st.dataframe(
+            conversation.value_counts().head(10).reset_index().rename(columns={'index': 'Conversation', 0: 'Count'}),
             use_container_width='stretch'
         )
 
     if st.button('Refresh'):
         st.rerun()  # refresh the dashboard to update visualizations and metrics
-    
-    time.sleep(2)  # add a small 2s delay to avoid overwhelming the CPU with rapid refreshes
-    st.rerun() # rerun the Streamlit app to update the dashboard in real-time
     
 
 if __name__ == "__main__":

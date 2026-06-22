@@ -32,11 +32,18 @@ Address type | Likely meaning
 10.x.x.x | Private network devices
 172.16–31.x.x | Private network devices
 127.0.0.1 | Your own computer (localhost)
+20.x.x.x & 52.x.x.x| Probably Microsoft
 Public IPs | Internet servers (Google, Cloudflare, Microsoft, etc.)
 
-# Potential Next Steps
+# What have I learnt?
 
-- Add a Top 10 destination ports chart
+- Most network traffic comes from your own device - I thought maybe watching a youtube video would cause a lot more traffic.
+- Lots of different ports being used in my network -> ephimeral (temporary) ports used by my device for communication. Doesn't really mean much.
+- Using locks to prevent concurrency issues (in this case, sniff being a continuous packet getter, and the dashboard generating visualisations every 2 seconds from the processed packet data). I had already learned about this at uni through C/C++ concurrency, but doing it in Python refreshed some knowledge and actually let me apply it in a simple but useful scenario.
+- Streamlit is a good data visualisation library! A lot more modern that MatPlotLib, but apparently less customisable.
+- How to basically use Scapy to get packets from my local network traffic.
+
+# Potential Next Steps
 
 - Add a filter dropdown for TCP/UDP/ICMP
 
@@ -47,3 +54,5 @@ Public IPs | Internet servers (Google, Cloudflare, Microsoft, etc.)
 - Create custom alerts based on traffic analysis patterns
 
 - Add packet payload analysis options
+
+- Create a real-time dashboard using a database and analytics tools (maybe using AWS?)
