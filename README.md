@@ -2,8 +2,6 @@
 
 Proof-of-concept local network traffic analysis tool to identify security patterns, detect anomalies, and ensure the security and efficiency of your local network
 
-Foundation built from tutorial at https://www.freecodecamp.org/news/build-a-real-time-network-traffic-dashboard-with-python-and-streamlit/#heading-prerequisites
-
 # Libraries Used
 
 - Streamlit for the dashboard visualizations
