@@ -1,3 +1,5 @@
+import json
+
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -31,6 +33,25 @@ COMMON_PORTS = {
     123: "NTP"
 }
 
+# "custom" log formatter for packet logs
+class PacketLogFormatter(logging.Formatter):
+    def format(self, record):
+        # literally just returns the raw message, in this case packet_info in json format
+        return record.getMessage()
+    
+# needed since streamlit runs whole script every time it refreshes
+if 'log_initialized' not in st.session_state:
+    log_filename = f'packets_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log'
+    packet_logger = logging.getLogger('packets')
+    packet_log_handler = logging.FileHandler(f'logs/{log_filename}')
+    packet_log_handler.setFormatter(PacketLogFormatter())
+    packet_logger.addHandler(packet_log_handler)
+    packet_logger.setLevel(logging.INFO)
+    packet_logger.propagate = False # prevents printing to terminal by root logger
+    st.session_state.log_initialized = True
+    st.session_state.log_filename = log_filename
+else:
+    packet_logger = logging.getLogger('packets')
 
 class PacketProcessor:
     """ Processes and analyses network packets """
@@ -63,7 +84,7 @@ class PacketProcessor:
 
                     # extract core packet information
                     packet_info = {
-                        'timestamp': datetime.now(),
+                        'timestamp': datetime.now().isoformat(),
                         'src_ip': packet[IP].src,
                         'src_hostname': resolve_hostname(packet[IP].src),
                         'dst_ip': packet[IP].dst,
@@ -89,8 +110,11 @@ class PacketProcessor:
                     self.packet_data.append(packet_info)
                     self.packet_count += 1
 
-                    if self.packet_count % 10 == 0:
+                    if self.packet_count % 100 == 0:
                         logger.info(f"Captured {self.packet_count} packets so far")
+                        
+                    # save in log file
+                    packet_logger.info(json.dumps(packet_info))
 
                     # limit the size of packet_data to avoid memory issues
                     if len(self.packet_data) > 10000:
@@ -120,7 +144,7 @@ def create_visualisations(df: pd.DataFrame) -> None:
             title='Protocol Distribution',
             labels={'names': 'Protocol', 'values': 'Packet Count'}
         )
-        st.plotly_chart(fig_protocol, use_container_width='stretch')
+        st.plotly_chart(fig_protocol, width='stretch')
 
         # Packets Timeline --------------------------
         # displays the number of packets captured per second over time
@@ -133,7 +157,7 @@ def create_visualisations(df: pd.DataFrame) -> None:
             title='Packets per Second',
             labels={'x': 'Time', 'y': 'Packet Count'}
         )
-        st.plotly_chart(fig_timeline, use_container_width='stretch')
+        st.plotly_chart(fig_timeline, width='stretch')
 
         # Top Source IPs Bar Chart -------------------
         # displays the top 10 source IPs by packet count
@@ -156,7 +180,7 @@ def create_visualisations(df: pd.DataFrame) -> None:
             }
         )
         fig_src.update_xaxes(type='category')
-        st.plotly_chart(fig_src, use_container_width=True)
+        st.plotly_chart(fig_src, width='stretch')
 
         # Top Destination IPs Bar Chart -------------
         df['dst_label'] = (
@@ -173,7 +197,7 @@ def create_visualisations(df: pd.DataFrame) -> None:
             labels={'x': 'Destination IP', 'y': 'Packet Count'}
         )
 
-        st.plotly_chart(fig_dst_ips, use_container_width=True)
+        st.plotly_chart(fig_dst_ips, width='stretch')
 
         # Top Ports Used ----------------------------
         top_dst_ports = df['dst_port'].value_counts().head(20).reset_index()
@@ -189,7 +213,7 @@ def create_visualisations(df: pd.DataFrame) -> None:
             labels={'Label': 'Destination Port', 'count': 'Packet Count'}
         )
         fig_dst_ports.update_xaxes(type='category')
-        st.plotly_chart(fig_dst_ports, use_container_width='stretch')
+        st.plotly_chart(fig_dst_ports, width='stretch')
 
 
 def start_packet_capture() -> None:
@@ -217,7 +241,7 @@ def resolve_hostname(ip) -> str:
     try:
         return socket.gethostbyaddr(ip)[0]
     except Exception:
-        return "Unknown"
+        return "???"
     
 
 def is_private_ip(ip) -> bool:
@@ -238,8 +262,8 @@ def main():
     """ Main function to run the Streamlit dashboard """
 
     # bugfix: set the page configuration before any other Streamlit commands
-    st.set_page_config(page_title="Network Traffic Dashboard", layout="wide")
-    st.title("Real-time Network Traffic Analysis")
+    st.set_page_config(page_title="Ribbitraffic", layout="wide")
+    st.title("Ribbitraffic - Real-time Network Traffic Analysis")
     
     # Initialize the packet processor and start packet capture if not already done
     if 'processor' not in st.session_state:
@@ -271,7 +295,7 @@ def main():
     if len(df) > 0:
         st.dataframe(
             df.tail(10)[['timestamp', 'src_ip', 'src_hostname', 'dst_ip', 'dst_hostname', 'dst_location', 'protocol', 'size', 'src_port', 'dst_port']],
-            use_container_width='stretch'
+            width='stretch'
         )
 
     # could change this to see which conversations transfer the most data (using 'size' col)
@@ -285,13 +309,19 @@ def main():
             + ' -> ' 
             + df['dst_hostname']
             + ' ('
+            + df['dst_location']
+            + ':'
             + df['dst_ip'].astype(str)
             + ')'
         )
         st.dataframe(
             conversation.value_counts().head(10).reset_index().rename(columns={'index': 'Conversation', 0: 'Count'}),
-            use_container_width='stretch'
+            width='stretch'
         )
+        
+    # wait 1 second and refresh - won't affect capture since that is a threaded process
+    time.sleep(1)   
+    st.rerun()
 
     if st.button('Refresh'):
         st.rerun()  # refresh the dashboard to update visualizations and metrics
@@ -299,3 +329,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# Note: could use https://iplocation.io/ for remote IP info ?
