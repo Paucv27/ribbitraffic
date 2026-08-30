@@ -72,15 +72,11 @@ Lots of different things I can do over time to improve this "dashboard"
 
 - Create a real-time dashboard using a database and analytics tools (maybe using AWS?)
 
-- Top talkers (highest bandwidth consumers)
-
 - Top protocols by volume
 
 - Packet size distribution analysis
 
 - MAC address collection
-
-- Export captured traffic statistics to CSV
 
 - Generate summary reports
 
