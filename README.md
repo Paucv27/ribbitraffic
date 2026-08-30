@@ -58,7 +58,7 @@ Public IPs | Internet servers (Google, Cloudflare, Microsoft, etc.)
 
 Lots of different things I can do over time to improve this "dashboard"
 
-- Containerising and integrating with Splunk
+- Containerising and integrating with Splunk/Wazuh/something else
 
 - Filtering specific IPs, protocols, ports...
 
