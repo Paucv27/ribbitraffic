@@ -9,6 +9,7 @@ import threading
 import logging
 import socket
 import ipaddress
+import whoisit
 
 
 # ==================================================================== GLOBALS
@@ -63,8 +64,18 @@ COMMON_PORTS = {
     9000: "Portainer"  # Docker management tools
 }
 
-DNS_LOCK = threading.Lock()
+IDENTITY_LOCK = threading.Lock()
 
+@st.cache_resource
+def bootstrap_rdap_client():
+    """ Downloads the IANA registries once per app lifecycle to maximize speed and efficiency """
+    try:
+        whoisit.bootstrap()
+        logger.info("Live RDAP network clients bootstrapped and cached successfully")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to bootstrap live RDAP network links: {e}")
+        return False
 
 # ==================================================================== CLASSES
 
@@ -74,7 +85,7 @@ class PacketLogFormatter(logging.Formatter):
     def format(self, record):
         # literally just returns the raw message, in this case packet_info in json format
         return record.getMessage()
-    
+
 
 class PacketProcessor:
     """ Processes and analyses network packets """
@@ -96,10 +107,13 @@ class PacketProcessor:
         self.start_time = datetime.now()
         self.packet_count = 0
         self.lock = threading.Lock()
-
         self.packet_logger = logging.getLogger('packets')
-
-        self.dns_cache = {}
+        self.identity_cache = {}
+        self.ignored_hosts = [
+                    "ARIN-PFS-IAD", 
+                    "RIPE-NCC", 
+                    "ARIN-PFS-SEA"
+                ]
 
     def get_protocol_name(self, proto_num: int) -> str:
         """ Returns the protocol name for a given protocol number """
@@ -111,27 +125,37 @@ class PacketProcessor:
         """
 
         # get result from cache if we have it, otherwise set value to Resolving... to not spam duplicate threads
-        with DNS_LOCK:
-            if ip in self.dns_cache:
-                return self.dns_cache[ip]
-            self.dns_cache[ip] = 'Resolving...'
+        with IDENTITY_LOCK:
+            if ip in self.identity_cache:
+                return self.identity_cache[ip]
+            self.identity_cache[ip] = '???'
 
         # if no cache hit, this runs and tries to resolve the hostname for the specified IP
         def lookup():
+            name = None
+            # 1. fetch ASN through network query
             try:
-                name = str(socket.gethostbyaddr(ip)[0])
+                results = whoisit.ip(ip)
+                if 'name' in results and results['name']:
+                    name = str(results['name'])
             except Exception:
-                logger.error(f"DNS Lookup couldn't resolve hostname for {ip} :( ")
-                name = '???'
-            with DNS_LOCK:
-                self.dns_cache[ip] = name
+                pass
+            
+            # 2. if ASN is unknown, fall back to standard reverse DNS
+            if not name:
+                try:
+                    name = str(socket.gethostbyaddr(ip)[0])
+                except Exception:
+                    name = "???"
+
+            with IDENTITY_LOCK:
+                self.identity_cache[ip] = name
 
         # threaded so it runs in background since DNS lookups can take a bit
         threading.Thread(target=lookup, daemon=True).start()
 
         # initially return 'Resolving...' to let user know DNS lookup is happening
-        return 'Resolving...'
-    
+        return '???'
 
     def is_private_ip(self, ip: str) -> bool:
         """ 
@@ -152,6 +176,16 @@ class PacketProcessor:
 
         try:
             if IP in packet:
+                src_ip = packet[IP].src
+                dst_ip = packet[IP].dst
+                
+                if src_ip in self.identity_cache or dst_ip in self.identity_cache:
+                    src_name = self.identity_cache.get(src_ip, "")
+                    dst_name = self.identity_cache.get(dst_ip, "")
+                    
+                    if any(domain in str(src_name) or domain in str(dst_name) for domain in self.ignored_hosts):
+                        return # ignore traffic to/from ASN resolvers
+                    
                 # lock so that multiple threads don't modify packet_data at the same time
                 # e.g. capture thread is adding new packets while the main thread is reading packet_data to update visualizations
                 # this ensures thread safety and prevents inconsistencies
@@ -160,10 +194,10 @@ class PacketProcessor:
                     # extract core packet information
                     packet_info = {
                         'timestamp': datetime.now().isoformat(),
-                        'src_ip': packet[IP].src,
+                        'src_ip': src_ip,
                         'src_hostname': self.resolve_hostname(packet[IP].src),
                         'src_location': 'Local' if self.is_private_ip(packet[IP].src) else 'Remote',
-                        'dst_ip': packet[IP].dst,
+                        'dst_ip': dst_ip,
                         'dst_hostname': self.resolve_hostname(packet[IP].dst),
                         'dst_location': 'Local' if self.is_private_ip(packet[IP].dst) else 'Remote',
                         'protocol': self.get_protocol_name(packet[IP].proto),
@@ -288,7 +322,7 @@ def create_visualisations(df: pd.DataFrame) -> None:
             top_dst_ports['dst_port'] = top_dst_ports['dst_port'].astype(int) # bugfix: stored as float in df
 
             top_dst_ports['Label'] = top_dst_ports['dst_port'].map(
-                lambda p: f"{p} ({COMMON_PORTS[p]})" if p in COMMON_PORTS else f"Port {p}"
+                lambda p: f"{p} ({COMMON_PORTS[p]})" if p in COMMON_PORTS else str(p)
             )
             fig_dst_ports = px.bar(
                 top_dst_ports,
@@ -398,6 +432,8 @@ def main():
 
     st.set_page_config(page_title="Ribbitraffic", layout="wide")
     st.title("Ribbitraffic | Real-time Network Traffic Analysis")
+
+    bootstrap_rdap_client()
     
     # Initialize the packet processor once into persistent session memory
     if 'processor' not in st.session_state:
