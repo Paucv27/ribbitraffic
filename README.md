@@ -9,21 +9,22 @@ Local network traffic analysis tool to identify security patterns, detect anomal
 - **Scapy** for network packet capturing and packet processing
 - **Plotly** for plotting charts with collected data
 - [**Whoisit**](https://github.com/meeb/whoisit) for live asynchronous RDAP/ASN organizational registry queries over HTTPS 
-- **Logging** to log and separate runtime terminal traces from structured packet JSON entries (`./logs/`)
+- **Logging** to log and separate runtime terminal traces from structured packet JSON entries (`C:\sniffer_logs\`)
 
 # Usage (local)
 
 ```
 git clone <repo-url> <optional-name>
+cd <project-folder>
 
 pip install -r requirements.txt
 
 streamlit run dashboard.py
 ```
-If on Windows, Npcap must be installed to run
+If on Windows, **Npcap** must be installed to run
 | Might have to be Admin Command Prompt (Windows) / sudo (Linux)
 
-**Dashboard refreshes every 1s, or you can manually refresh by pressing 'R'**
+**Dashboard automatically refreshes every 1s, or you can manually refresh by pressing 'R'**
 
 # Docker Usage - LINUX ONLY
 Docker Desktop works differently on Windows, meaning it can never natively sniff packets on your wifi or ethernet card. Basically, the network is isolated for the container (like its own private network, and it can't access the real one outside the container)
@@ -46,6 +47,55 @@ docker run -d \
 *   `--net=host`: Maps the container directly to the host's physical network routing table
 *   `--cap-add=NET_ADMIN`: Grants root security capabilities to configure interface capture hooks
 *   `-v`: Binds internal telemetry output straight onto the host's filesystem (`/var/log/`)
+
+# Integrating with Wazuh
+
+To scale this dashboard into an enterprise monitoring solution, I integrated Ribbitraffic with the **Wazuh SIEM / XDR platform**. The native Python script runs locally to capture hardware traffic, writes structured logs down to a local drive directory, and passes them to a containerized Wazuh cluster for the SIEM functions.
+
+1. **Deploying the Stack via Docker:**
+   I deployed the complete single-node Wazuh cluster (Manager, Indexer, and Dashboard) via Docker Compose.
+   ![Wazuh Docker Container Stack](screenshots/Wazuh_Docker_Container.png)
+
+2. **Deploying the Native Collection Agent:**
+   I installed the native Windows Wazuh Agent on my host PC to monitor the logfiles on my local drive. I modified the agent’s configuration file (`ossec.conf`) to target the unified logging path and set it to match JSON formatting natively.
+   ![ossec.conf file edited to watch custom JSON paths](screenshots/Wazuh_OssecAgent_Config.png)
+
+3. **Endpoints Activation:**
+   I registered the local endpoint agent named **Croaker** and established a secure, authenticated TLS encryption tunnel back to the Docker manager container listening on localhost.
+   ![Wazuh Agent Dashboard showing active status](screenshots/Wazuh_Agent_Started.png)
+
+4. **Writing Custom Threat Rules:**
+   I wrote custom detection rules inside `local_rules.xml` (forgot to take screenshot). I decided on these 3 simple rules for now:
+   ```xml
+   <group name="ribbitraffic,">
+
+     <!-- base packet ingestion rule (just logging the fact a packet was captured) -->
+     <rule id="100002" level="3">
+       <decoded_as>json</decoded_as>
+       <description>Ribbitraffic sniffer captured a network packet.</description>
+     </rule>
+
+     <!-- high-volume warning (when an unusual amount of data is transferred) -->
+     <rule id="100003" level="7">
+       <if_sid>100002</if_sid>
+       <field name="size" type="number" greater_than="1500">\.+</field>
+       <description>Ribbitraffic Warning: Large packet size detected.</description>
+     </rule>
+
+     <!-- ICMP/Ping scanning alert -->
+     <rule id="100004" level="10">
+       <if_sid>100002</if_sid>
+       <protocol>ICMP</protocol>
+       <description>Ribbitraffic Critical: ICMP network mapping detected.</description>
+     </rule>
+
+   </group>
+   ```
+
+5. **SIEM Telemetry Verification:**
+   Once compiled, my custom Python fields successfully began parsing into indexable, searchable database columns inside the Wazuh Events dashboard view in real-time!
+   ![Wazuh Threat Intelligence dashboard showing log ingestion](screenshots/Wazuh_Ingesting_Logs.png)
+
 
 # Findings / Learning
 
@@ -81,7 +131,6 @@ Public IPs | Internet servers (Google, Cloudflare, Microsoft, etc.)
 
 Lots of different things I can do over time to improve this "dashboard"
 
-- **SIEM Integration**: Install a native local Wazuh agent on the host folder path to stream JSON packet entries into an external enterprise security orchestration cluster.
 - **Malware Ingestion Profiles**: Configure signature scanning capabilities utilizing automated local YARA engine patterns.
 - **Geographical IP Tracking**: Map external corporate target coordinates dynamically onto physical maps.
 - **Machine Learning Anomaly Detection**: Build baseline behavioral profiles to flag abnormal packet spikes or data exfiltration attempts.
