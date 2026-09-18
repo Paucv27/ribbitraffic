@@ -443,7 +443,7 @@ def main():
         log_filename = f'packets_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log'
 
         packet_logger = logging.getLogger('packets')
-        packet_log_handler = logging.FileHandler(f'logs/{log_filename}')
+        packet_log_handler = logging.FileHandler(f'C:\\sniffer_logs\\{log_filename}')
         packet_log_handler.setFormatter(PacketLogFormatter())
         packet_logger.addHandler(packet_log_handler)
         packet_logger.setLevel(logging.INFO)
